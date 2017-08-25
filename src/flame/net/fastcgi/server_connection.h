@@ -9,7 +9,11 @@ namespace fastcgi {
 	class server;
 	class server_connection {
 	private:
-		uv_pipe_t socket_;
+		union {
+			uv_stream_t socket_;
+			uv_pipe_t socket_pipe_;
+			uv_tcp_t  socket_tcp_;
+		};
 		server*   server_;
 
 		enum {
@@ -60,7 +64,7 @@ namespace fastcgi {
 		php::buffer	   val_; // 缓冲还未接收完成的数据
 
 		multipart_parser_settings mps_;
-		multipart_parser*         mpp_;
+		multipart_parser          mpp_;
 
 		void start();
 		void close();
