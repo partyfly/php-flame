@@ -74,6 +74,7 @@ php::value server_response::write(php::parameters& params) {
 	}
 	if(!prop("header_sent").is_true()) {
 		buffer_head();
+		prop("header_sent") = true;
 	}
 	// TODO 若实际传递的 data 大于可容纳的 body 最大值 64k，需要截断若干次发送 buffer_body 发送
 	php::string& data = params[0].to_string();
@@ -109,6 +110,7 @@ php::value server_response::end(php::parameters& params) {
 	prop("ended") = true;
 	if(!prop("header_sent").is_true()) {
 		buffer_head();
+		prop("header_sent") = true;
 	}
 	if(params.length() >= 1) {
 		// TODO 若实际传递的 data 大于可容纳的 body 最大值 64k，需要截断若干次发送 buffer_body 发送
@@ -160,7 +162,7 @@ void server_response::write_cb(uv_write_t* req, int status) {
 	int size = self->buffer_.size();
 	self->buffer_.reset();
 	// 若 Web 服务器没有保持连接的标记，在请求结束后关闭连接
-	if(self->conn_->flag & PF_KEEP_CONN == 0 && self->prop("ended").is_true()) {
+	if((self->conn_->flag & PF_KEEP_CONN) == 0 && self->prop("ended").is_true()) {
 		self->conn_->close();
 	}
 	if(status < 0) {
