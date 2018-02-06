@@ -1,3 +1,4 @@
+#include "deps.h"
 #include "../../flame.h"
 #include "../../coroutine.h"
 #include "client_request.h"
@@ -16,7 +17,7 @@ php::value client_request::__construct(php::parameters& params) {
 	if (params.length() >= 3) {
 		prop("timeout") = static_cast<int>(params[2]);
 	}else{
-		prop("timeout") = 2500;
+		prop("timeout") = 3000;
 	}
 	if (params.length() >= 2) {
 		prop("body")   = params[1];
@@ -49,7 +50,7 @@ php::value client_request::ssl(php::parameters& params) {
 			curl_easy_setopt(easy_, CURLOPT_SSL_VERIFYPEER, 0);
 		}
 	}
-	CURLcode r = CURLE_UNKNOWN_OPTION;
+	CURLcode r = CURLE_OK;
 	php::string crt = opt.at("cert",4);
 	if(crt.is_string()) {
 		if(std::strncmp(crt.c_str() + crt.length() - 4, ".pem", 4) == 0) {
@@ -134,8 +135,8 @@ void client_request::build_cookie() {
 	php::buffer cookie;
 	php::array& cookie_all = prop("cookie");
 	for(auto i=cookie_all.begin(); i!= cookie_all.end(); ++i) {
-		php::string& key = i->first.to_string();
-		php::string& val = i->second.to_string();
+		php::string key = i->first.to_string();
+		php::string val = i->second.to_string();
 		std::memcpy(cookie.put(key.length()), key.c_str(), key.length());
 		cookie.add('=');
 		std::memcpy(cookie.put(val.length()), val.c_str(), val.length());

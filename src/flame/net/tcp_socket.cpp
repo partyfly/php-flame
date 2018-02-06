@@ -1,3 +1,4 @@
+#include "deps.h"
 #include "../flame.h"
 #include "../coroutine.h"
 #include "net.h"
@@ -21,7 +22,7 @@ namespace net {
 	} connect_request_t;
 	php::value tcp_socket::connect(php::parameters& params) {
 		php::string addr = params[0];
-		int         port = params[1], err;
+		int         port = params[1].to_long(), err;
 		struct sockaddr_storage address;
 		err = sock_addrfrom(&address, addr.c_str(), port);
 		if(err != 0) {
@@ -89,9 +90,9 @@ namespace net {
 	// property remote_address ""
 	void tcp_socket::close() {
 		if(sck) {
-			uv_close((uv_handle_t*)sck, free_handle_cb);
 			rdr.close();
 			wtr.close();
+			uv_close((uv_handle_t*)sck, free_handle_cb);
 			sck = nullptr;
 		}
 	}

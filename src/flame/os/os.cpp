@@ -1,14 +1,18 @@
+#include "deps.h"
+#include "../flame.h"
 #include "../coroutine.h"
+#include "../net/unix_socket.h"
 #include "os.h"
 #include "process.h"
 #include "cluster/cluster.h"
-#include "../net/unix_socket.h"
 
 namespace flame {
 namespace os {
 	static php::value executable(php::parameters& params) {
 		php::string str(256);
-		uv_exepath(str.data(), &str.length());
+		std::size_t len = 256;
+		uv_exepath(str.data(), &len);
+		str.resize(len);
 		return std::move(str);
 	}
 	static php::value spawn(php::parameters& params) {
@@ -44,7 +48,7 @@ namespace os {
 		// net::unix_socket* err2 = proc2->stderr_.native<net::unix_socket>();
 		out2->rdr.read_all();
 		// read_all 异步，在下面 exec_cb 中接收其返回值
-		coroutine::current->yield(exec_cb, nullptr);
+		coroutine::current->async(exec_cb, nullptr);
 		// !!! 若需要 stderr 应在 exec_cb 中启动 err2->rdr.read_all()
 		// 并再加入一个 yield 回调函数
 		return flame::async(proc2);

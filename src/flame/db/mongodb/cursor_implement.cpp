@@ -1,3 +1,5 @@
+#include "deps.h"
+#include "../../flame.h"
 #include "../../coroutine.h"
 #include "../../thread_worker.h"
 #include "cursor_implement.h"
@@ -7,7 +9,7 @@
 namespace flame {
 namespace db {
 namespace mongodb {
-	cursor_implement::cursor_implement(std::shared_ptr<thread_worker> worker, cursor* c, mongoc_cursor_t* cs)
+	cursor_implement::cursor_implement(thread_worker* worker, cursor* c, mongoc_cursor_t* cs)
 	:worker_(worker)
 	,cpp_(c)
 	,css_(cs) {

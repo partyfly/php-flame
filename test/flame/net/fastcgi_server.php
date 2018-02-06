@@ -4,18 +4,25 @@ flame\go(function() {
 	// 创建 fastcgi 处理器
 	$handler = new flame\net\fastcgi\handler();
 	// 设置处理程序
-	$a = $handler->get("/hello", function($req, $res) {
+	$a = $handler->get("/favicon.ico", function($req, $res) {
+		yield $res->write_header(404);
+		yield $res->end();
+	})
+	->get("/hello", function($req, $res) {
 		yield flame\time\sleep(2000);
 		var_dump($req->method, $req->cookie); // GET
-		$res->set_cookie("test", "bbbb", 1000, "/hello", null, false, true);
-		yield $res->write("hello ");
-		yield $res->end("world\n");
+		yield $res->write("hello '");
+		yield $res->write($req->method);
+		yield $res->end("'\n");
 	})
 	->post("/hello", function($req, $res) {
 		yield flame\time\sleep(2000);
-		var_dump($req->method, $req->header, $req->body); // POST ....
-		yield $res->write("hello ");
-		yield $res->end("world\n");
+		var_dump($req->method, $req->header, "[[[", $req->body, "]]]"); // POST ....
+		$res->set_cookie("test", "bbbb", 1000, "/hello", null, false, true);
+
+		yield $res->write("hello '");
+		yield $res->write($req->method);
+		yield $res->end("'\n");
 	})
 	->get("/server/events/source", function($req, $res) {
 		$res->header["Content-Type"]  = "text/event-stream";
@@ -45,7 +52,6 @@ HTMLCODE;
 	})
 	// 默认处理程序（即：不匹配上述路径形式时调用）
 	->handle(function($req, $res) {
-		yield flame\time\sleep(2000);
 		var_dump($req);
 		$data = json_encode($req);
 		yield $res->end($data);

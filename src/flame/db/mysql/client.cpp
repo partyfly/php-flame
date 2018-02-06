@@ -1,3 +1,5 @@
+#include "deps.h"
+#include "../../flame.h"
 #include "../../coroutine.h"
 #include "../../thread_worker.h"
 #include "mysql.h"
@@ -5,27 +7,26 @@
 #include "client.h"
 #include "result_set.h"
 
-#define MYSQL_PING_INTERVAL 10000
 namespace flame {
 namespace db {
 namespace mysql {
 	void client::val_to_buffer(php::value& val, php::buffer& buf) {
 		if(val.is_null()) {
 			std::memcpy(buf.put(4), "NULL", 4);
-		}else if(val.is_bool()) {
-			if(val.is_true()) std::memcpy(buf.put(4), "TRUE", 4);
-			else std::memcpy(buf.put(5), "FALSE", 5);
+		}else if(val.is_true()) {
+			std::memcpy(buf.put(4), "TRUE", 4);
+		}else if(val.is_false()) {
+			std::memcpy(buf.put(5), "FALSE", 5);		
 		}else if(val.is_string()) {
 			buf.add('\'');
 			php::string& str = val;
 			char*        esp = buf.rev(str.length() * 2);
-			size_t       len = mysqlnd_real_escape_string(impl->mysql_, esp,
-				str.data(), str.length());
+			size_t       len = mysql_real_escape_string(&impl->mysql_, esp, str.data(), str.length());
 			buf.adv(len);
 			buf.add('\'');
 		}else if(val.is_long()) {
 			long   x = val;
-			size_t n = sprintf(buf.rev(10), "%ld", x);
+			size_t n = sprintf(buf.rev(16), "%ld", x);
 			buf.adv(n);
 		}else if(val.is_array()) {
 			php::array& row = val;
@@ -40,8 +41,7 @@ namespace mysql {
 			buf.add('\'');
 			php::string& str = val.to_string();
 			char*        esp = buf.rev(str.length() * 2);
-			size_t       len = mysqlnd_real_escape_string(impl->mysql_, esp,
-				str.data(), str.length());
+			size_t       len = mysql_real_escape_string(&impl->mysql_, esp, str.data(), str.length());
 			buf.adv(len);
 			buf.add('\'');
 		}
@@ -58,18 +58,8 @@ namespace mysql {
 		}
 		buf.add(')');
 	}
-	client::client()
-	: impl(new client_implement(std::make_shared<thread_worker>(), this)) {
-		
-	}
-	client::~client() {
-		client_request_t* ctx = new client_request_t {
-			nullptr, impl, nullptr
-		};
-		ctx->req.data = ctx;
-		impl->worker_->queue_work(&ctx->req, client_implement::close_wk, default_cb);
-	}
 	php::value client::__construct(php::parameters& params) {
+		impl = new client_implement(this);
 		if(params.length() > 0 && params[0].is_array()) {
 			php::array& opts = params[0];
 			if(opts.at("debug", 5).is_true()) {
@@ -77,28 +67,55 @@ namespace mysql {
 			}
 			php::value ping = opts.at("ping", 4);
 			if(ping.is_long()) {
-				impl->ping_interval = static_cast<int>(ping);
-				if(impl->ping_interval < 15000) {
-					impl->ping_interval = 15 * 1000;
+				ping_interval = static_cast<int>(ping);
+				if(ping_interval < 15000) {
+					ping_interval = 15 * 1000;
 				}
-			} // 默认 ping_interval = 60 * 1000
+			}else{
+				ping_interval = 60 * 1000;
+			}
+		}else{ // 默认
+			ping_interval = 60 * 1000;
 		}
 		return nullptr;
 	}
+	php::value client::__destruct(php::parameters& params) {
+		impl->destroy();
+		return nullptr;
+	}
 	php::value client::connect(php::parameters& params) {
-		client_request_t* ctx;
+		// 指定参数时连接指定的服务器
 		if(params.length() > 0 && params[0].is_string()) {
-			ctx = new client_request_t {
-				coroutine::current, impl, nullptr, params[0]
-			};
-		}else{ // 不指定连接字符串时一般时重新连接
-			ctx = new client_request_t {
-				coroutine::current, impl, nullptr
-			};
+			php::string& url = params[0];
+			url_ = php::parse_url(url.c_str(), url.length());
+			if(!url_ || !url_->scheme || !url_->path || ! url_->host
+				|| strncasecmp(url_->scheme, "mysql", 5) != 0 || std::strlen(url_->path) < 1) {
+				throw php::exception("failed to parse mysql connection uri", 36);
+			}
+			if(!url_->port) { // 默认端口
+				url_->port = 3306;
+			}
 		}
+		client_request_t* ctx = new client_request_t {
+			coroutine::current, impl, nullptr
+		};
 		ctx->req.data = ctx;
-		impl->worker_->queue_work(&ctx->req, client_implement::connect_wk, default_cb);
+		impl->worker_.queue_work(&ctx->req, client_implement::connect_wk, connect_cb);
 		return flame::async(this);
+	}
+	void client::connect_cb(uv_work_t* req, int status) {
+		client_request_t* ctx = reinterpret_cast<client_request_t*>(req->data);
+		// 使用 rv 可能带回错误信息
+		if(ctx->rv.is_string()) {
+			php::string& msg = ctx->rv;
+			ctx->co->fail(msg, 0);
+		}else if(ctx->rv.is_pointer() && ctx->rv.ptr<MYSQL>() == &ctx->self->mysql_) {
+			ctx->co->fail(mysql_error(&ctx->self->mysql_), mysql_errno(&ctx->self->mysql_));
+		}else{
+			ctx->self->start();
+			ctx->co->next(ctx->rv);
+		}
+		delete ctx;
 	}
 	php::value client::format(php::parameters& params) {
 		if(params.length() < 1 || !params[0].is_string()) {
@@ -122,18 +139,22 @@ namespace mysql {
 			coroutine::current, impl, nullptr, sql
 		};
 		ctx->req.data = ctx;
-		impl->worker_->queue_work(&ctx->req, client_implement::query_wk, queue_cb);
+		impl->worker_.queue_work(&ctx->req, client_implement::query_wk, query_cb);
 	}
-	void client::queue_cb(uv_work_t* req, int status) {
+	void client::query_cb(uv_work_t* req, int status) {
 		client_request_t* ctx = reinterpret_cast<client_request_t*>(req->data);
-		if(ctx->rv.is_pointer()) {
-			MYSQLND_RES* rs = ctx->rv.ptr<MYSQLND_RES>();
+		if(ctx->rv.is_pointer() && ctx->rv.ptr<MYSQL>() == &ctx->self->mysql_) {
+			ctx->co->fail(mysql_error(&ctx->self->mysql_), mysql_errno(&ctx->self->mysql_));
+		}else if(ctx->rv.is_pointer()) {
+			MYSQL_RES* rs = ctx->rv.ptr<MYSQL_RES>();
 			php::object obj = php::object::create<result_set>();
 			result_set* cpp = obj.native<result_set>();
 			ctx->rv = std::move(obj);
-			cpp->init(ctx->self->worker_, ctx->self->client_, rs);
+			cpp->init(&ctx->self->worker_, ctx->self->client_, rs);
+			ctx->co->next(ctx->rv);
+		}else if(ctx->rv.is_bool()) {
+			ctx->co->next(ctx->rv);
 		}
-		ctx->co->next(ctx->rv);
 		delete ctx;
 	}
 	php::value client::query(php::parameters& params) {
@@ -176,8 +197,8 @@ namespace mysql {
 		return flame::async(this);
 	}
 	php::value client::remove(php::parameters& params) {
-		if(params.length() < 2 || !params[0].is_string() || !params[1].is_array()) {
-			throw php::exception("table name and filter array is required");
+		if(params.length() < 2 || !params[0].is_string()) {
+			throw php::exception("table name is required");
 		}
 		php::string& table = params[0];
 		php::buffer sql;
@@ -195,15 +216,15 @@ namespace mysql {
 		return flame::async(this);
 	}
 	php::value client::update(php::parameters& params) {
-		if(params.length() < 2 || !params[0].is_string() || !params[1].is_array() || !params[2].is_array()) {
-			throw php::exception("table name, filter array and update array is required");
+		if(params.length() < 2 || !params[0].is_string() || !params[2].is_array()) {
+			throw php::exception("table name and update array is required");
 		}
 		php::string& table = params[0];
 		php::array&  data  = params[2];
 		php::buffer  sql;
 		std::memcpy(sql.put(8), "UPDATE `", 8);
 		std::memcpy(sql.put(table.length()), table.c_str(), table.length());
-		std::memcpy(sql.put(7), "` SET", 5);
+		std::memcpy(sql.put(5), "` SET", 5);
 		int j = -1;
 		for(auto i=data.begin(); i!=data.end(); ++i) {
 			php::string& key = i->first;
@@ -226,8 +247,8 @@ namespace mysql {
 		return flame::async(this);
 	}
 	php::value client::one(php::parameters& params) {
-		if(params.length() < 2 || !params[0].is_string() || !params[1].is_array()) {
-			throw php::exception("table name and query array is required");
+		if(params.length() < 2 || !params[0].is_string()) {
+			throw php::exception("table name is required");
 		}
 		php::string& table = params[0];
 		php::buffer  sql;
@@ -243,7 +264,7 @@ namespace mysql {
 			coroutine::current, impl, nullptr, std::move(sql)
 		};
 		ctx->req.data = ctx;
-		impl->worker_->queue_work(&ctx->req, client_implement::one_wk, default_cb);
+		impl->worker_.queue_work(&ctx->req, client_implement::one_wk, default_cb);
 		return flame::async(this);
 	}
 	php::value client::select(php::parameters& params) {
@@ -290,9 +311,9 @@ namespace mysql {
 		client_request_t* ctx = new client_request_t {
 			coroutine::current, impl, nullptr
 		};
-		ctx->sql = php::string("SELECT FOUND_ROWS()");
+		ctx->sql = php::string("SELECT FOUND_ROWS()", 19);
 		ctx->req.data = ctx;
-		impl->worker_->queue_work(&ctx->req, client_implement::found_rows_wk, default_cb);
+		impl->worker_.queue_work(&ctx->req, client_implement::found_rows_wk, default_cb);
 		return flame::async(this);
 	}
 	void client::default_cb(uv_work_t* req, int status) {
@@ -302,8 +323,8 @@ namespace mysql {
 			if(ctx->rv.is_string()) {
 				php::string& msg = ctx->rv;
 				ctx->co->fail(msg, 0);
-			}else if(ctx->rv.is_pointer() && ctx->rv.ptr<MYSQLND>() == ctx->self->mysql_) {
-				ctx->co->fail(mysqlnd_error(ctx->self->mysql_), mysqlnd_errno(ctx->self->mysql_));
+			}else if(ctx->rv.is_pointer() && ctx->rv.ptr<MYSQL>() == &ctx->self->mysql_) {
+				ctx->co->fail(mysql_error(&ctx->self->mysql_), mysql_errno(&ctx->self->mysql_));
 			}else{
 				ctx->co->next(ctx->rv);
 			}

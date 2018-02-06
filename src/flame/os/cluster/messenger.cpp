@@ -1,8 +1,9 @@
+#include "deps.h"
 #include "../../flame.h"
 #include "../../coroutine.h"
-#include "messenger.h"
 #include "../../net/tcp_socket.h"
 #include "../../net/unix_socket.h"
+#include "messenger.h"
 
 namespace flame {
 namespace os {
@@ -26,6 +27,7 @@ namespace cluster {
 		delete self;
 	}
 	void messenger::close() {
+		uv_read_stop((uv_stream_t*)&pipe_);
 		uv_close((uv_handle_t*)&pipe_, close_cb);
 	}
 	void messenger::alloc_cb(uv_handle_t* handle, size_t suggest, uv_buf_t* buf) {

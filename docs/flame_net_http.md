@@ -1,5 +1,5 @@
 ### `namespace flame\net`
-提供基本的 HTTP 协议网络协程式客户端封装；底层使用 curl 并内置使用 nghttp2 提供了 HTTP/2 支持；
+提供基本的 HTTP/1 协议服务器封装，协程式客户端封装（底层使用 curl 并内置使用 nghttp2 提供了 HTTP/2 支持）；
 
 #### `yield flame\net\http\get(string $url, integer $timeout = 2500)`
 简单的 `GET` 请求方法。
@@ -124,12 +124,12 @@ $req->body = ["a"=> "b", "c"=> "d"];
 ``` PHP
 <?php
 $cli = new flame\net\http\client([
-	"conn_share" => "pipe", // null/"" => 不进行排队或并行
+	"conn_share" => "pipe", // "none" => 不进行排队或并行
 	                 // "pipe" => 管道传输 HTTP/1.1 请求（同一连接）
 	                 // "plex" => 并行传输 HTTP/2 请求（STREAM）
-					 // "both"  => PIPE + PLEX
-	"conn_per_host" => 4,  // 默认 2，同 HOST:PORT 请求建立的最大连接数
-	"pipe_per_conn" => 2,  // 默认 4，单连接 HTTP/1.1 管道排队数量
+					 // "both"  => 默认，PIPE + PLEX 
+	"conn_per_host" => 4,  // 默认 2，同 HOST:PORT 请求建立的最大连接数 必须 <= 512
+	"pipe_per_conn" => 2,  // 默认 4，单连接 HTTP/1.1 管道排队数量 必须 <= 256
 ]);
 ```
 
@@ -210,3 +210,87 @@ HTTP 响应体，方便直接将对象作为文本使用；
 
 **注意**：
 * 文件上传请求的请求体类型为 `multipart/form-data` ，提取 `name` 作为 KEY 文件内容数据作为 VAL，**不会** 生成 `PHP` 中类似 `$_FILES` 的结构；
+
+#### `server_request::$data`
+默认为 null，可用于在 before / handle / after 之间传递数据；
+
+### `class flame\net\http\handler`
+HTTP/1 协议处理器，用于 tcp_server / unix_server 解析 `HTTP/1` 协议，并提供 HTTP 服务；
+
+参考：`test/flame/net/http_server.php`
+
+#### `handler::get/post/put/remove(string $path, callable $cb)`
+分别用于设置 GET / POST / PUT / DELETE 请求方法对应路径的处理回调；
+
+#### `handler::handle(callable $cb)`
+设置默认处理回调（未匹配路径回调），或设置指定路径的请求处理回调（`$path` 参数可选）；回调函数接收两个参数：
+* `$request` - 类型 `class flame\net\http\server_request` 的实例，请参考 `flame\net\http` 命名空间中的相关说明；
+* `$response` - 类型 `class flame\net\fastcgi\server_response` 的实例，请参考下文；
+
+**示例**：
+``` PHP
+<?php
+$handler->get("/hello", function($req, $res) {
+	var_dump($req->header["host"]);
+	yield $res->write("hello world\n");
+	yield $res->end();
+})->handle(function($req, $res) {
+	yield $res->end('{"error":"router not found"}');
+});
+```
+
+**注意**：
+* `handler` 会为每次回调启用新的协程；
+
+#### `handler::before(callable $cb)`
+设置一个在每次请求处理过程开始前被执行的回调，可以用于处理诸如登录判定、权限控制等；
+
+**注意**：
+* `handler` 会为每次回调启用新的协程；
+
+#### `handler::after(callable $cb)`
+设置一个在每次请求处理过程接手后（请求、响应对象还未被销毁前）被执行的回调，可以用于处理诸如日志记录、格式输出等；
+
+**注意**：
+* `handler` 会为每次回调启用新的协程；
+
+### `class flame\net\http\server_response`
+由上述 `handler` 生成，并回调传递给处理函数使用，用于返回响应数据给 Web 服务器；
+
+**注意**：
+* 默认情况下，服务端输出响应将自动按照 `Transfer-Encoding: chunked` 描述的方式进行；可自行设置 `Content-Length` 头信息使用标准方式输出；
+
+#### `array server_response::$header`
+响应头部 KEY/VAL 数组，默认包含 `Content-Type: text/plain`（）；其他响应头请酌情考虑添加、覆盖；
+
+**示例**：
+``` PHP
+<?php
+$res->header["Content-Type"] = "text/html";
+$res->header["X-Server"] = "Flame/0.7.0";
+```
+
+**注意**：
+* 所有输出的 HEADER 数据 **区分大小写**；
+
+#### `server_response::$data`
+默认为 null，可用于在 before / handle / after 之间传递数据；（参考 http_server2.php 示例）；
+
+#### `server_response::set_cookie(string $name [, string $value = "" [, int $expire = 0 [, string $path = "" [, string $domain = "" [, bool $secure = false [, bool $httponly = false ]]]]]])`
+
+定义一个 Cookie 并通过在响应头 `Set-Cookie` 下发（实际发送在 `writer_header` 时触发）；效果与 PHP 内置函数 [setcookie](http://php.net/manual/en/function.setcookie.php) 类似；
+
+#### `yield server_response::write_header(integer $status_code)`
+设置并输出响应头部（含上述响应头 KEY/VAL 及响应状态行），请参照标准 HTTP/1.1 STATUS_CODE 设置数值；
+
+#### `yield server_response::write(string $data)`
+输出指定响应内容，若还未发送相应头，将自动调用 `write_header` 发送相应头（默认 `200 OK`）；请参考 `handle()` 的相关示例；
+
+**注意**：
+* 请谨慎在多个协程中使用 `write`/`end` 函数时，防止输出顺序混乱；
+
+#### `yield server_response::end([string $data])`
+结束请求，若还未发送响应头，将自动调用 `write_header` 发送相应头（默认 `200 OK`）；可选输出响应内容；输出完成后结束响应；
+
+**注意**：
+* 当 `server_response` 对象被销毁时，会自动结束响应 `end()` ；

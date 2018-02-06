@@ -1,3 +1,5 @@
+#include "deps.h"
+#include "../../flame.h"
 #include "../../coroutine.h"
 #include "../../thread_worker.h"
 #include "client.h"
@@ -12,23 +14,18 @@
 namespace flame {
 namespace db {
 namespace mongodb {
-	void collection::init(std::shared_ptr<thread_worker> worker, client* cli, mongoc_collection_t* col) {
+	void collection::init(thread_worker* worker, client* cli, mongoc_collection_t* col) {
 		impl = new collection_implement(worker, this, col);
 		ref_ = cli;
 	}
-	collection::collection()
-	:impl(nullptr) {
-
-	}
-	collection::~collection() {
-		if(impl) {
-			collection_request_t* ctx = new collection_request_t {
-				nullptr, impl, nullptr
-			};
-			ctx->req.data = ctx;
-			impl->worker_->queue_work(&ctx->req, collection_implement::close_wk,
-				default_cb);
-		}
+	php::value collection::__destruct(php::parameters& params) {
+		collection_request_t* ctx = new collection_request_t {
+			nullptr, impl, nullptr
+		};
+		ctx->req.data = ctx;
+		// 这里不能使用 close_work ，实际关闭在 client 中
+		impl->worker_->queue_work(&ctx->req, collection_implement::close_wk, default_cb);
+		return nullptr;
 	}
 	void collection::default_cb(uv_work_t* w, int status) {
 		collection_request_t* ctx = reinterpret_cast<collection_request_t*>(w->data);
@@ -74,13 +71,11 @@ namespace mongodb {
 			throw php::exception("illegal document, document array is required");
 		}
 		collection_request_t* ctx = new collection_request_t {
-			coroutine::current, impl, nullptr, docs
+			coroutine::current, impl, nullptr, docs, php::array(nullptr)
 		};
 		ctx->req.data = ctx;
-		if(params.length() > 1 && params[1].is_true()) {
-			ctx->flags = true;
-		}else{
-			ctx->flags = false;
+		if(params.length() > 1 && params[1].is_array()) {
+			ctx->doc2 = params[1];
 		}
 		impl->worker_->queue_work(&ctx->req, collection_implement::insert_many_wk, insert_many_cb);
 		return flame::async(this);

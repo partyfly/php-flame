@@ -1,9 +1,10 @@
+#include "deps.h"
 #include "../../flame.h"
 #include "../../coroutine.h"
+#include "../../time/time.h"
 #include "client.h"
 #include "client_request.h"
 #include "client_response.h"
-#include "../../time/time.h"
 
 // 所有导出到 PHP 的函数必须符合下面形式：
 // php::value fn(php::parameters& params);
@@ -16,8 +17,16 @@ php::value client::__construct(php::parameters& params) {
 		return nullptr;
 	}
 	php::array&  opts = params[0];
+	int host = opts.at("conn_per_host");
+	if(host > 0 && host < 512) {
+		curl_multi_setopt(multi_, CURLMOPT_MAX_HOST_CONNECTIONS, host);
+	}else{
+		curl_multi_setopt(multi_, CURLMOPT_MAX_HOST_CONNECTIONS, 2);
+	}
 	php::string& conn = opts.at("conn_share");
 	if(conn.is_empty()) {
+		curl_multi_setopt(multi_, CURLMOPT_PIPELINING, CURLPIPE_HTTP1 | CURLPIPE_MULTIPLEX); // 默认需要 pipeline
+	}else if(conn.length() == 4 && std::strncmp(conn.c_str(), "none", 4) == 0) {
 		curl_multi_setopt(multi_, CURLMOPT_PIPELINING, CURLPIPE_NOTHING);
 	}else if(conn.length() == 4 && std::strncmp(conn.c_str(), "pipe", 4) == 0) {
 		curl_multi_setopt(multi_, CURLMOPT_PIPELINING, CURLPIPE_HTTP1);
@@ -28,24 +37,17 @@ php::value client::__construct(php::parameters& params) {
 	}
 	int pipe = opts.at("pipe_per_conn");
 	if(pipe > 0 && pipe < 256) {
-		curl_multi_setopt(multi_, CURLMOPT_MAX_PIPELINE_LENGTH, conn);
+		curl_multi_setopt(multi_, CURLMOPT_MAX_PIPELINE_LENGTH, pipe);
 	}else{
 		curl_multi_setopt(multi_, CURLMOPT_MAX_PIPELINE_LENGTH, 4);
-	}
-	int host = opts.at("conn_per_host");
-	if(host > 0 && host < 512) {
-		curl_multi_setopt(multi_, CURLMOPT_MAX_HOST_CONNECTIONS, conn);
-	}else{
-		curl_multi_setopt(multi_, CURLMOPT_MAX_HOST_CONNECTIONS, 2);
 	}
 	return nullptr;
 }
 void client::default_options() {
 	curl_multi_setopt(multi_, CURLMOPT_PIPELINING, CURLPIPE_HTTP1 | CURLPIPE_MULTIPLEX);
-	curl_multi_setopt(multi_, CURLMOPT_MAX_PIPELINE_LENGTH, 4);
-	curl_multi_setopt(multi_, CURLMOPT_MAX_HOST_CONNECTIONS, 2);
+    curl_multi_setopt(multi_, CURLMOPT_MAX_PIPELINE_LENGTH, 4);
+    curl_multi_setopt(multi_, CURLMOPT_MAX_HOST_CONNECTIONS, 2);
 }
-
 typedef struct exec_context_t {
 	coroutine*       co;
 	client*          self;
@@ -62,17 +64,17 @@ void client::curl_multi_info_check(client* self) {
 		if(message->msg == CURLMSG_DONE) {
 			exec_context_t* ctx;
 			curl_easy_getinfo(message->easy_handle, CURLINFO_PRIVATE, &ctx);
+			long status;
+			curl_easy_getinfo(message->easy_handle, CURLINFO_RESPONSE_CODE, &status);
+			assert(message->easy_handle == ctx->req->easy_);
+			curl_multi_remove_handle(ctx->self->multi_, ctx->req->easy_);
 			if (message->data.result != CURLE_OK) {
 				ctx->co->fail(curl_easy_strerror(message->data.result), message->data.result);
 			} else {
-				long status;
-				curl_easy_getinfo(message->easy_handle, CURLINFO_RESPONSE_CODE, &status);
 				ctx->res->done_cb(status);
-				// 因为 req 的 done_cb 将关闭 easy_handle（导致所有 msg 数据无法访问）
-				ctx->req->done_cb(message); 
+				ctx->req->done_cb(message);  // 因为 req 的 done_cb 将关闭 easy_handle（导致所有 msg 数据无法访问）
 				ctx->co->next(std::move(ctx->res));
 			}
-			curl_multi_remove_handle(ctx->self->multi_, ctx->req->easy_);
 			delete ctx;
 		}else{
 			std::fprintf(stderr, "[%s] (flame\\net\\http\\client): error: message not done\n", time::datetime(time::now()));
@@ -225,7 +227,7 @@ php::value get(php::parameters& params) {
 	if(params.length() > 1) {
 		req->prop("timeout") = params[1].to_long();
 	}else{
-		req->prop("timeout") = 2500;
+		req->prop("timeout") = 3000;
 	}
 	return default_client->exec2(obj);
 }
@@ -240,7 +242,7 @@ php::value post(php::parameters& params) {
 	if(params.length() > 2) {
 		obj.prop("timeout") = params[2].to_long();
 	}else{
-		obj.prop("timeout") = 2500;
+		obj.prop("timeout") = 3000;
 	}
 	return default_client->exec2(obj);
 }
@@ -255,7 +257,7 @@ php::value put(php::parameters& params) {
 	if(params.length() > 2) {
 		obj.prop("timeout") = params[2].to_long();
 	}else{
-		obj.prop("timeout") = 2500;
+		obj.prop("timeout") = 3000;
 	}
 	return default_client->exec2(obj);
 }
@@ -270,7 +272,7 @@ php::value remove(php::parameters& params) {
 	if(params.length() > 1) {
 		obj.prop("timeout") = params[1].to_long();
 	}else{
-		obj.prop("timeout") = 2500;
+		obj.prop("timeout") = 3000;
 	}
 	return default_client->exec2(obj);
 }

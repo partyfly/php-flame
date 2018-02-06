@@ -1,39 +1,34 @@
+#include "deps.h"
+#include "../../flame.h"
 #include "../../coroutine.h"
+#include "mysql.h"
 #include "result_implement.h"
 
 #define MYSQL_PING_INTERVAL 10000
 namespace flame {
 namespace db {
 namespace mysql {
-	result_implement::result_implement(std::shared_ptr<thread_worker> worker, MYSQLND_RES* rs)
+	result_implement::result_implement(thread_worker* worker, MYSQL_RES* rs)
 	: worker_(worker)
 	, rs_(rs) {
 		
 	}
 	void result_implement::fetch_row_wk(uv_work_t* req) {
 		result_request_t* ctx = reinterpret_cast<result_request_t*>(req->data);
-		if(ctx->type == MYSQLND_FETCH_NUM) {
-			mysqlnd_fetch_into(ctx->self->rs_, MYSQLND_FETCH_NUM, (zval*)&ctx->rv, MYSQLND_MYSQLI);
-		}else/* if(ctx->type == MYSQLND_FETCH_ASSOC) */{
-			mysqlnd_fetch_into(ctx->self->rs_, MYSQLND_FETCH_ASSOC, (zval*)&ctx->rv, MYSQLND_MYSQLI);
+		if(ctx->type == MYSQL_FETCH_NUM) {
+			sql_fetch_row(ctx->self->rs_, ctx->rv, MYSQL_FETCH_NUM);
+		}else/* if(ctx->type == MYSQL_FETCH_ASSOC) */{
+			sql_fetch_row(ctx->self->rs_, ctx->rv, MYSQL_FETCH_ASSOC);
 		}
 	}
 	void result_implement::fetch_all_wk(uv_work_t* req) {
 		result_request_t* ctx = reinterpret_cast<result_request_t*>(req->data);
-		
-		php::array rv(0);
-		php::value rs;
-		mysqlnd_fetch_into(ctx->self->rs_, ctx->type == MYSQLND_FETCH_NUM ? MYSQLND_FETCH_NUM : MYSQLND_FETCH_ASSOC, (zval*)&rs, MYSQLND_MYSQLI);
-		for(int i=0; rs.is_array(); ++i) {
-			rv[i] = std::move(rs);
-			mysqlnd_fetch_into(ctx->self->rs_, ctx->type == MYSQLND_FETCH_NUM ? MYSQLND_FETCH_NUM : MYSQLND_FETCH_ASSOC, (zval*)&rs, MYSQLND_MYSQLI);
-		}
-		ctx->rv = std::move(rv);
+		sql_fetch_all(ctx->self->rs_, ctx->rv, ctx->type == MYSQL_FETCH_NUM ? MYSQL_FETCH_NUM : MYSQL_FETCH_ASSOC);
 	}
 	
 	void result_implement::close_wk(uv_work_t* req) {
 		result_request_t* ctx = reinterpret_cast<result_request_t*>(req->data);
-		mysqlnd_free_result(ctx->self->rs_, true);
+		mysql_free_result(ctx->self->rs_);
 		delete ctx->self;
 	}
 }

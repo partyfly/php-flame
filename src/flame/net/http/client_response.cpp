@@ -1,3 +1,6 @@
+#include "deps.h"
+#include "../../flame.h"
+#include "../../coroutine.h"
 #include "client_response.h"
 
 namespace flame {
@@ -12,9 +15,9 @@ namespace http {
 		header_parser_conf.on_key = header_key_cb;
 		header_parser_conf.on_val = header_val_cb;
 		header_parser_conf.s1 = ':';
-		header_parser_conf.s2 = '\n';
-		header_parser_conf.w1 = '\r';
-		header_parser_conf.w2 = '\r';
+		header_parser_conf.s2 = '\r';
+		header_parser_conf.w1 = '\n';
+		header_parser_conf.w2 = '\0';
 
 		cookie_parser_conf.on_key = cookie_key_cb;
 		cookie_parser_conf.on_val = cookie_val_cb;
@@ -55,6 +58,7 @@ namespace http {
 			self->cookie_item = nullptr;
 			kv_parser_reset(&self->cookie_parser);
 			kv_parser_execute(&self->cookie_parser, &self->cookie_parser_conf, data, size);
+			self->cookie_item = nullptr;
 		}else if(self->key_size > 0) {
 			self->header_.at(self->key_data, self->key_size) = php::string(data, size);
 		}

@@ -1,3 +1,4 @@
+#include "deps.h"
 #include "../flame.h"
 #include "../coroutine.h"
 #include "net.h"
@@ -20,7 +21,7 @@ namespace net {
 		if(sck == nullptr) throw php::exception("bind failed: socket is already closed");
 		
 		std::string addr = params[0];
-		int         port = params[1], err;
+		int         port = params[1].to_long(), err;
 		struct sockaddr_storage address;
 		err = sock_addrfrom(&address, addr.c_str(), port);
 		if(err < 0) {
@@ -89,7 +90,7 @@ namespace net {
 		if(sck == nullptr) throw php::exception("send failed: socket is already closed"); // 已关闭
 		
 		php::string addr = params[1];
-		int         port = params[2], err;
+		int         port = params[2].to_long(), err;
 
 		struct sockaddr_storage address;
 		err = sock_addrfrom(&address, addr.c_str(), port);
@@ -137,7 +138,10 @@ namespace net {
 			else co->fail(uv_strerror(err), err);
 		}
 		if(sck) {
-			if(init_) uv_close((uv_handle_t*)sck, free_handle_cb);
+			if(init_) {
+				uv_udp_recv_stop(sck);
+				uv_close((uv_handle_t*)sck, free_handle_cb);
+			}
 			else free(sck); // 未初始化，直接释放即可
 			sck = nullptr;
 		}

@@ -1,5 +1,8 @@
-#include "net.h"
+#include "deps.h"
+#include "../flame.h"
 #include "../coroutine.h"
+#include "../log/log.h"
+#include "net.h"
 #include "udp_socket.h"
 #include "udp_packet.h"
 #include "unix_socket.h"
@@ -40,7 +43,7 @@ namespace net {
 		class_tcp_socket.add<&tcp_socket::read>("read");
 		class_tcp_socket.add<&tcp_socket::read_all>("read_all");
 		class_tcp_socket.add<&tcp_socket::write>("write");
-		class_tcp_socket.add<&tcp_socket::write>("close");
+		class_tcp_socket.add<&tcp_socket::close>("close");
 		ext.add(std::move(class_tcp_socket));
 		// class_tcp_server
 		// ------------------------------------
@@ -109,7 +112,7 @@ namespace net {
 		uv_fileno(h, &fd);
 		int opt = 1;
 		if(-1 == setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &opt, sizeof(opt))) {
-			php::warn("failed to enable SO_REUSEPORT:", strerror(errno));
+			log::default_logger->write(fmt::format("(WARN) unable to enable SO_REUSEPORT: ({0}) {1}", errno, strerror(errno)));
 		}
 	#endif
 	}

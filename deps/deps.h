@@ -34,6 +34,8 @@
 #include "mongo-c-driver/bin/include/libbson-1.0/bson.h"
 #include "mongo-c-driver/bin/include/libmongoc-1.0/mongoc.h"
 #include "librdkafka/src/rdkafka.h"
-extern "C" {
-#include "ext/mysqlnd/mysqlnd.h"
-}
+#include "fmt/fmt/format.h"
+#include "http-parser/http_parser.h"
+#include "rabbitmq-c/librabbitmq/amqp.h"
+#include "rabbitmq-c/librabbitmq/amqp_tcp_socket.h"
+#include "mysql-connector-c/include/mysql.h"

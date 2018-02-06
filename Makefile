@@ -2,22 +2,23 @@
 # ---------------------------------------------------------------------
 EXTENSION=${EXT_NAME}.so
 EXT_NAME=flame
-EXT_VER=1.3.0
+EXT_VER=1.3.0dev
 # PHP环境
 # ---------------------------------------------------------------------
-PHP_PREFIX?=/usr/local/php-7.0.25
+PHP_PREFIX?=/usr/local/php
 PHP=${PHP_PREFIX}/bin/php
 PHP_CONFIG=${PHP_PREFIX}/bin/php-config
 # 编译参数
 # ---------------------------------------------------------------------
-CXX?=/usr/local/gcc-7.1.0/bin/g++
+CXX?=/usr/local/gcc/bin/g++
 CXXFLAGS?= -O2
-CXXFLAGS_CORE= -std=c++14 -fPIC
-INCLUDES_CORE= `${PHP_CONFIG} --includes` -I./deps -I./deps/libuv/include -I./deps/mongo-c-driver/bin/include/libbson-1.0
-# 链接参数
-# ---------------------------------------------------------------------
-LDFLAGS?=-Wl,-rpath=/usr/local/gcc-7.1.0/lib64/
+LDFLAGS?=-Wl,-rpath=/usr/local/gcc/lib64/
+
+CXXFLAGS_CORE= -std=c++11 -fPIC
 LDFLAGS_CORE= -u get_module -Wl,-rpath='$$ORIGIN/'
+INCLUDES_CORE= `${PHP_CONFIG} --includes` -I./deps -I./deps/libuv/include -I./deps/mongo-c-driver/bin/include/libbson-1.0 -I./deps/rabbitmq-c/librabbitmq -I./deps/mysql-connector-c/include
+# 依赖库
+# ---------------------------------------------------------------------
 LIBRARY=./deps/multipart-parser-c/multipart_parser.o \
  ./deps/fastcgi-parser/fastcgi_parser.o \
  ./deps/kv-parser/kv_parser.o \
@@ -30,7 +31,10 @@ LIBRARY=./deps/multipart-parser-c/multipart_parser.o \
  ./deps/hiredis/libhiredis.a \
  ./deps/mongo-c-driver/bin/lib/libmongoc-1.0.a \
  ./deps/mongo-c-driver/bin/lib/libbson-1.0.a \
- ./deps/librdkafka/src/librdkafka.a
+ ./deps/librdkafka/src/librdkafka.a \
+ ./deps/http-parser/libhttp_parser.a \
+ ./deps/rabbitmq-c/build/librabbitmq/librabbitmq.a \
+ ./deps/mysql-connector-c/lib/libmysqlclient.a
 # 代码和预编译头文件
 # ---------------------------------------------------------------------
 SOURCES=$(shell find ./src -name "*.cpp")
@@ -47,9 +51,9 @@ ${EXTENSION}: ${LIBRARY} ${OBJECTS}
 ${HEADERX}: deps/deps.h
 	${CXX} -x c++ ${CXXFLAGS_CORE} ${CXXFLAGS} ${INCLUDES_CORE} -c $^ -o $@
 src/extension.o: src/extension.cpp
-	${CXX} ${CXXFLAGS_CORE} -include ./deps/deps.h -DEXT_NAME=\"${EXT_NAME}\" -DEXT_VER=\"${EXT_VER}\" ${CXXFLAGS} ${INCLUDES_CORE} -c $^ -o $@
+	${CXX} ${CXXFLAGS_CORE} -DEXT_NAME=\"${EXT_NAME}\" -DEXT_VER=\"${EXT_VER}\" ${CXXFLAGS} ${INCLUDES_CORE} -c $^ -o $@
 %.o: %.cpp ${HEADERX}
-	${CXX} ${CXXFLAGS_CORE} -include ./deps/deps.h ${CXXFLAGS} ${INCLUDES_CORE} -c $< -o $@
+	${CXX} ${CXXFLAGS_CORE} ${CXXFLAGS} ${INCLUDES_CORE} -c $< -o $@
 # 清理安装
 # ----------------------------------------------------------------------
 clean:
@@ -62,7 +66,7 @@ install: ${EXTENSION}
 # ----------------------------------------------------------------------
 ./deps/nghttp2/bin/lib/libnghttp2.a:
 	cd ./deps/nghttp2; git submodule update --init; autoreconf -i; automake; autoconf; CFLAGS=-fPIC /bin/sh ./configure --disable-shared --prefix `pwd`/bin
-	make -C ./deps/nghttp2 -j2
+	make -C ./deps/nghttp2
 	make -C ./deps/nghttp2 install
 	cd ./deps/nghttp2; find -type l | xargs rm
 ./deps/libphpext/libphpext.a:
@@ -90,7 +94,7 @@ install: ${EXTENSION}
 	cd ./deps/mongo-c-driver/src/libbson; NOCONFIGURE=1 ./autogen.sh;
 	cd ./deps/mongo-c-driver; NOCONFIGURE=1 ./autogen.sh;
 	cd ./deps/mongo-c-driver; CFLAGS=-fPIC CXXFLAGS=-fPIC ./configure --prefix=`pwd`/bin --disable-automatic-init-and-cleanup --disable-shm-counters --enable-static=yes --enable-shared=no
-	make -C ./deps/mongo-c-driver -j2
+	make -C ./deps/mongo-c-driver
 	make -C ./deps/mongo-c-driver install
 	cd ./deps/mongo-c-driver; find -type l | xargs rm; 
 ./deps/fmt/fmt/libfmt.a:
@@ -106,6 +110,11 @@ install: ${EXTENSION}
 	cd ./deps/librdkafka; chmod +x ./configure; chmod +x ./lds-gen.py; ./configure --enable-static
 	make -C ./deps/librdkafka -j2
 	cd ./deps/librdkafka; find -type l | xargs rm;
+./deps/http-parser/libhttp_parser.a:
+	cd ./deps/http-parser; CFLAGS="-fPIC" make package
+./deps/rabbitmq-c/build/librabbitmq/librabbitmq.a:
+	cd ./deps/rabbitmq-c; mkdir build; cd build;cmake -DBUILD_SHARED_LIBS=OFF -DCMAKE_C_FLAGS="-fPIC" ..
+	cd ./deps/rabbitmq-c/build; CFLAGS="-fPIC" make
 
 # 依赖清理
 # ---------------------------------------------------------------------
@@ -126,3 +135,5 @@ clean-deps:
 	make -C ./deps/c-ares clean
 	rm -rf ./deps/c-ares/bin
 	make -C ./deps/librdkafka clean
+	make -C ./deps/http-parser clean
+	rm -rf ./deps/rabbitmq-c/build

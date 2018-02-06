@@ -1,7 +1,9 @@
-#include "time.h"
-#include "../coroutine.h"
-#include "ticker.h"
+#include "deps.h"
 #include "../flame.h"
+#include "../coroutine.h"
+#include "time.h"
+#include "ticker.h"
+
 
 namespace flame {
 namespace time {
@@ -19,19 +21,6 @@ namespace time {
 		// 标记异步任务的特殊返回值
 		return flame::async();
 	}
-	static void async_exception_cb(uv_timer_t* handle) {
-		coroutine* co = reinterpret_cast<coroutine*>(handle->data);
-		co->fail("test async exception");
-		uv_close((uv_handle_t*)handle, flame::free_handle_cb);
-	}
-	static php::value async_exception(php::parameters& params) {
-		uv_timer_t* req = (uv_timer_t*)malloc(sizeof(uv_timer_t));
-		req->data = coroutine::current;
-		uv_timer_init(flame::loop, req);
-		uv_timer_start(req, async_exception_cb, 1, 0);
-		// 标记异步任务的特殊返回值
-		return flame::async();
-	}
 	// 示例：包裹 sleep 异步函数
 	// -------------------------------------------------------------------------
 	static void sleep2_timer_cb(php::value& rv, coroutine* co, void* data) {
@@ -39,12 +28,14 @@ namespace time {
 	}
 	static php::value sleep_wrapper(php::parameters& params) {
 		sleep(params);
-		coroutine::current->yield(sleep2_timer_cb);
-		// !!! 使用了 yield 函数，当发生同步异常时，需要调用 clear 删除
+		coroutine::current->async(sleep2_timer_cb);
 		return flame::async();
 	}
 	// -------------------------------------------------------------------------
 	static php::value now(php::parameters& params) {
+		if(params.length() > 0 && params[0].is_true()) {
+			uv_update_time(flame::loop);
+		}
 		return now();
 	}
 	static int64_t real_time_diff;
@@ -54,7 +45,6 @@ namespace time {
 				std::chrono::system_clock::now().time_since_epoch()).count();
 		real_time_diff = uv_now(flame::loop) - rtime;
 
-		ext.add<async_exception>("flame\\async_exception");
 		ext.add<sleep>("flame\\time\\sleep");
 		ext.add<now>("flame\\time\\now");
 		php::class_entry<ticker> class_ticker("flame\\time\\ticker");
@@ -69,6 +59,7 @@ namespace time {
 		ext.add<flame::time::after>("flame\\time\\after");
 	}
 	int64_t now() { // 代价较每次取系统时间要低一些
+		// uv_update_time(flame::loop);
 		return uv_now(flame::loop) - real_time_diff;
 	}
 	const char* datetime(int64_t st) {

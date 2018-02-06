@@ -12,10 +12,11 @@
 	4. [UDP 客户端、服务端](/php-flame/flame_net)；
 	5. [FastCGI 处理器](/php-flame/flame_net_fastcgi) - 挂接 Nginx 等实现 HTTP 服务；
 3. [协程式数据库驱动](/php-flame/flame_db)：
-	1. [简单 Redis 客户端](/php-flame/flame_db)；
-	2. [简单 Mongodb 客户端](/php-flame/flame_db_mongodb)；
-	3. [简单 MySQL 客户端](/php-flame/flame_db_mysql)；
-	4. [简单 Kafka 客户端](/php-flame/flame_db_kafka)；
+	1. [Redis 客户端](/php-flame/flame_db) - 简单封装；
+	2. [Mongodb 客户端](/php-flame/flame_db_mongodb) - 简单封装；
+	3. [MySQL 客户端](/php-flame/flame_db_mysql) - 简单封装；
+	4. [Kafka](/php-flame/flame_db_kafka) - 简单生产消费；
+	4. [RabbitMQ](/php-flame/flame_db_rabbitmq) - 简单生产消费；
 
 **源码**：
 [https://github.com/terrywh/php-flame/](https://github.com/terrywh/php-flame/)
@@ -26,8 +27,9 @@
 **注意**：
 * 文档中带 `yield` 前缀的函数为“异步”、“协程式”函数，请在调用时也保持 `yield` 关键字；
 * 调用包含 `yield` 关键字的函数，也需要添加 `yield` 支持 “异步” 调用；
-* 嵌套异步 `Generator` 可使用 `yield` 关键字直接调用，也可以使用 `PHP` 的嵌套语法 `yield from`；具体可参考 PHP 文档： [Gernerator Syntax](http://php.net/manual/en/language.generators.syntax.php) 的相关说明；
+* `Generator` 使用支持 `PHP` 的嵌套语法 `yield from` 方式进行嵌套，同时框架也支持直接使用 `yield` 关键字；
 * 由于 PHP 构造、析构函数的特殊性，不支持在其中使用异步函数；
+* 由于异步函数是由 `flame\run()` 触发框架内部执行的，故当异步函数发生异常时其异常堆栈信息不能完成的表达执行流程；
 
 **示例**：
 ``` PHP
@@ -108,4 +110,4 @@ flame\run(); // 实际程序在此循环调度
 
 **注意**:
 * 此函数调用一般放置在入口执行文件的最后，开始后本函数会阻塞进行协程运行、调度，直到所有协程执行结束；
-* 由于所有异步调度动作在本函数中进行，故当有错误发生时 PHP 的错误堆栈，可能会包含本函数的调用过程；
+* 由于所有异步调度动作在本函数中进行，故当异步函数流程发生错误时堆栈信息可能仅包含 `flame\run()` 运行过程；
